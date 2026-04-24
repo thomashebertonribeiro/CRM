@@ -20,11 +20,13 @@ import AdmZip from 'adm-zip';
 import fs from 'fs';
 import path from 'path';
 import https from 'https';
+import http from 'http';
 import readline from 'readline';
 
 const DATA_DIR = process.env.RF_DATA_DIR || './data/rf';
 const DB_PATH = path.join(DATA_DIR, 'cnpj.db');
-const RF_BASE_URL = 'https://dadosabertos.rfb.gov.br/CNPJ';
+const RF_BASE_URL = process.env.RF_BASE_URL || 'https://dadosabertos.rfb.gov.br/CNPJ';
+const RF_MIRROR_URL = 'https://github.com/jonathands/dados-abertos-receita-cnpj/releases/download/2023.05';
 
 const UF_FILTER = process.env.RF_UF_FILTER
   ? process.env.RF_UF_FILTER.toUpperCase().split(',').map(s => s.trim())
@@ -44,38 +46,57 @@ function downloadFile(url, destPath) {
   return new Promise((resolve, reject) => {
     log(`Downloading: ${url}`);
     const file = fs.createWriteStream(destPath);
-    https.get(url, (res) => {
-      if (res.statusCode === 301 || res.statusCode === 302) {
-        file.close();
-        fs.unlinkSync(destPath);
-        return downloadFile(res.headers.location, destPath).then(resolve).catch(reject);
-      }
-      if (res.statusCode !== 200) {
-        file.close();
-        fs.unlinkSync(destPath);
-        return reject(new Error(`HTTP ${res.statusCode} for ${url}`));
-      }
-      const total = parseInt(res.headers['content-length'] || '0', 10);
-      let downloaded = 0;
-      let lastPct = -1;
-      res.on('data', (chunk) => {
-        downloaded += chunk.length;
-        if (total > 0) {
-          const pct = Math.floor(downloaded / total * 100);
-          if (pct !== lastPct && pct % 10 === 0) {
-            log(`  ${pct}% (${(downloaded / 1024 / 1024).toFixed(1)}MB / ${(total / 1024 / 1024).toFixed(1)}MB)`);
-            lastPct = pct;
-          }
+
+    function tryDownload(targetUrl, redirectCount = 0) {
+      if (redirectCount > 5) return reject(new Error('Too many redirects'));
+      const lib = targetUrl.startsWith('https') ? https : http;
+      lib.get(targetUrl, { timeout: 30000 }, (res) => {
+        if (res.statusCode === 301 || res.statusCode === 302) {
+          file.close();
+          return tryDownload(res.headers.location, redirectCount + 1);
         }
+        if (res.statusCode !== 200) {
+          file.close();
+          if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+          return reject(new Error(`HTTP ${res.statusCode} for ${targetUrl}`));
+        }
+        const total = parseInt(res.headers['content-length'] || '0', 10);
+        let downloaded = 0;
+        let lastPct = -1;
+        res.on('data', (chunk) => {
+          downloaded += chunk.length;
+          if (total > 0) {
+            const pct = Math.floor(downloaded / total * 100);
+            if (pct !== lastPct && pct % 10 === 0) {
+              log(`  ${pct}% (${(downloaded / 1024 / 1024).toFixed(1)}MB / ${(total / 1024 / 1024).toFixed(1)}MB)`);
+              lastPct = pct;
+            }
+          }
+        });
+        res.pipe(file);
+        file.on('finish', () => { file.close(); resolve(); });
+      }).on('error', (err) => {
+        file.close();
+        if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+        reject(err);
       });
-      res.pipe(file);
-      file.on('finish', () => { file.close(); resolve(); });
-    }).on('error', (err) => {
-      file.close();
-      if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
-      reject(err);
-    });
+    }
+
+    tryDownload(url);
   });
+}
+
+async function downloadWithFallback(filename, destPath) {
+  // Try official RF server first
+  try {
+    await downloadFile(`${RF_BASE_URL}/${filename}`, destPath);
+    return;
+  } catch (e) {
+    log(`Official RF server failed (${e.message}), trying GitHub mirror...`);
+    if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+  }
+  // Fallback to GitHub mirror
+  await downloadFile(`${RF_MIRROR_URL}/${filename}`, destPath);
 }
 
 function setupDatabase(db) {
@@ -304,7 +325,7 @@ async function main() {
   // 1. Download and import Municipios
   const municipiosZip = path.join(DATA_DIR, 'Municipios.zip');
   if (!fs.existsSync(municipiosZip)) {
-    await downloadFile(`${RF_BASE_URL}/Municipios.zip`, municipiosZip);
+    await downloadWithFallback('Municipios.zip', municipiosZip);
   } else {
     log('Municipios.zip already downloaded, skipping...');
   }
@@ -317,7 +338,7 @@ async function main() {
     const zipPath = path.join(DATA_DIR, zipName);
 
     if (!fs.existsSync(zipPath)) {
-      await downloadFile(`${RF_BASE_URL}/${zipName}`, zipPath);
+      await downloadWithFallback(zipName, zipPath);
     } else {
       log(`${zipName} already downloaded, skipping download...`);
     }
