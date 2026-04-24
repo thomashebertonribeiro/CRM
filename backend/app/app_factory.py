@@ -23,9 +23,10 @@ def create_app() -> Flask:
     app.config["JSONIFY_PRETTYPRINT_REGULAR"] = False
 
     # ─── CORS (BACK-05) ───
+    _origins = ALLOWED_ORIGINS if ALLOWED_ORIGINS != ["*"] else "*"
     CORS(app, resources={
         r"/api/*": {
-            "origins": ALLOWED_ORIGINS,
+            "origins": _origins,
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "X-API-Key"],
             "max_age": 3600,

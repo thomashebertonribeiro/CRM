@@ -28,10 +28,8 @@ OLLAMA_FALLBACKS = os.environ.get("OLLAMA_FALLBACKS", "minimax-m2.7,deepseek-v3.
 BRASIL_API = "https://brasilapi.com.br/api/cnpj/v1/{}"
 
 # ─── CORS (BACK-05) ───
-ALLOWED_ORIGINS = os.environ.get(
-    "ALLOWED_ORIGINS",
-    "http://185.139.1.41:8089,http://185.139.1.41:8088"
-).split(",")
+_raw_origins = os.environ.get("ALLOWED_ORIGINS", "*")
+ALLOWED_ORIGINS = _raw_origins.split(",") if _raw_origins != "*" else ["*"]
 
 # ─── Rate Limiting (CORE-01, BACK-05) ───
 RATE_LIMIT_GLOBAL = int(os.environ.get("RATE_LIMIT_GLOBAL", "100"))  # req/min
