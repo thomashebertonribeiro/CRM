@@ -7,6 +7,7 @@ Follows AI-09 (Provider Gateway with circuit breaker, retry, fallback).
 import re
 import time
 import requests as http_requests
+from app.services.usage_tracker import track
 from app.config.settings import (
     SERPER_KEY, OLLAMA_KEY, OLLAMA_BASE, OLLAMA_MODEL, OLLAMA_FALLBACKS,
     BRASIL_API, AI_SYSTEM_PROMPT, AI_TIMEOUT, AI_MAX_TOKENS,
@@ -102,6 +103,11 @@ def serper_search(query: str, search_type: str = "search") -> dict:
     except Exception as e:
         print(f"Serper error ({search_type}): {e}")
         return {}
+    finally:
+        try:
+            track('serper')
+        except Exception:
+            pass
 
 
 # ─── BrasilAPI ───
@@ -115,6 +121,11 @@ def check_cnpj(cnpj: str) -> dict | None:
             return r.json()
     except Exception:
         pass
+    finally:
+        try:
+            track('brasilapi')
+        except Exception:
+            pass
     return None
 
 
@@ -149,6 +160,10 @@ def ai_analyze(prompt: str, timeout: int = AI_TIMEOUT, max_tokens: int = AI_MAX_
                 },
                 timeout=timeout,
             )
+            try:
+                track('ollama')
+            except Exception:
+                pass
             if r.status_code == 200:
                 resp = r.json()
                 msg = resp["choices"][0]["message"]
@@ -179,12 +194,20 @@ def ai_analyze(prompt: str, timeout: int = AI_TIMEOUT, max_tokens: int = AI_MAX_
                             },
                             timeout=timeout + 30,
                         )
+                        try:
+                            track('ollama')
+                        except Exception:
+                            pass
                         if r2.status_code == 200:
                             resp2 = r2.json()
                             content = resp2["choices"][0]["message"].get("content", "") or ""
                             finish_reason = resp2["choices"][0].get("finish_reason", "")
                     except Exception as e2:
                         print(f"[IA] Retry failed: {e2}")
+                        try:
+                            track('ollama')
+                        except Exception:
+                            pass
 
                 # If content is still empty after retry, construct from reasoning
                 if not content and reasoning:
@@ -200,6 +223,10 @@ def ai_analyze(prompt: str, timeout: int = AI_TIMEOUT, max_tokens: int = AI_MAX_
         except Exception as e:
             print(f"Ollama {model} error: {e}")
             cb.record_failure()
+            try:
+                track('ollama')
+            except Exception:
+                pass
 
     return "IA temporariamente indisponível. Dados cadastrais e score foram calculados normalmente."
 

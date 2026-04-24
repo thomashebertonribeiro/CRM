@@ -868,6 +868,7 @@ window.Prospector = {
   deleteLead, reanalyzeLead, showAnalysisEditor, saveAnalysis, deleteSearch,
   loadSearch, openDiagModal, closeDiagModal, generateDiagnosis, copyWhatsAppMsg,
   analyzeNextLead, analyzeAllLeads, runAll, toggleLead, findLeadIndex,
+  loadHistory,
   // Expose state and components for components.js
   AppState, getFilteredLeads
 };

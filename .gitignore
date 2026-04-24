@@ -67,6 +67,10 @@ coverage.xml
 
 # ─── Temp scripts ───
 flatten_patch.py
+start_backend.bat
+
+# ─── Kiro IDE ───
+.kiro/
 
 # ─── Brace expansion leftovers ───
 {backend,frontend}/

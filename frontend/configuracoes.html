@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Configurações — Prospector</title>
+<meta name="description" content="Configure as chaves de API e monitore o consumo de cada serviço.">
+<meta name="theme-color" content="#6366F1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" type="image/png" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+
+<!-- ═══ HEADER ═══ -->
+<header class="app-header" role="banner">
+  <a class="app-logo" href="/" aria-label="Prospector — Página inicial">
+    <div class="app-logo-icon" aria-hidden="true">🔍</div>
+    <div>
+      <div class="app-logo-text">Prospector</div>
+      <div class="app-logo-sub">Prospecção Inteligente com IA</div>
+    </div>
+  </a>
+  <nav class="header-nav" role="navigation" aria-label="Navegação principal">
+    <a href="/" class="nav-link">🔍 Prospecção</a>
+    <a href="/configuracoes.html" class="nav-link nav-link--active" aria-current="page">⚙️ Configurações</a>
+  </nav>
+</header>
+
+<main class="container" role="main">
+
+  <div class="page-title-row">
+    <h1 class="page-title">⚙️ Configurações</h1>
+    <p class="page-subtitle">Gerencie suas chaves de API e acompanhe o consumo de cada serviço.</p>
+  </div>
+
+  <!-- ═══ SETTINGS & USAGE ═══ -->
+  <section class="settings-section" id="settingsSection" aria-label="Configurações e consumo de APIs">
+
+    <!-- Settings Panel -->
+    <div class="card settings-card">
+      <div class="card-header">
+        <span class="card-icon" aria-hidden="true">⚙️</span>
+        <h2 class="card-title">Chaves de API</h2>
+      </div>
+      <form id="settingsForm" onsubmit="event.preventDefault(); saveSettingsPage();" novalidate>
+        <div class="settings-form">
+
+          <div class="settings-field-group">
+            <label class="form-label" for="SERPER_KEY">Serper API Key <span class="field-hint">(Google Search)</span></label>
+            <div class="key-input-row">
+              <input type="password" id="SERPER_KEY" name="SERPER_KEY" class="form-input" placeholder="Deixe em branco para manter a atual" autocomplete="off" aria-describedby="serperKeyStatus">
+              <span id="serperKeyStatus" class="key-status" aria-live="polite"></span>
+            </div>
+          </div>
+
+          <div class="settings-field-group">
+            <label class="form-label" for="OLLAMA_KEY">Ollama API Key <span class="field-hint">(IA)</span></label>
+            <div class="key-input-row">
+              <input type="password" id="OLLAMA_KEY" name="OLLAMA_KEY" class="form-input" placeholder="Deixe em branco para manter a atual" autocomplete="off" aria-describedby="ollamaKeyStatus">
+              <span id="ollamaKeyStatus" class="key-status" aria-live="polite"></span>
+            </div>
+          </div>
+
+          <div class="settings-field-group">
+            <label class="form-label" for="OLLAMA_BASE">Ollama Base URL</label>
+            <input type="text" id="OLLAMA_BASE" name="OLLAMA_BASE" class="form-input" placeholder="https://ollama.com/v1" autocomplete="off">
+          </div>
+
+          <div class="settings-field-group">
+            <label class="form-label" for="OLLAMA_MODEL">Modelo de IA</label>
+            <input type="text" id="OLLAMA_MODEL" name="OLLAMA_MODEL" class="form-input" placeholder="glm-5.1" autocomplete="off">
+          </div>
+
+          <div class="settings-field-group settings-field-group--full">
+            <label class="form-label" for="OLLAMA_FALLBACKS">Modelos Fallback <span class="field-hint">(separados por vírgula)</span></label>
+            <input type="text" id="OLLAMA_FALLBACKS" name="OLLAMA_FALLBACKS" class="form-input" placeholder="minimax-m2.7,deepseek-v3.2" autocomplete="off">
+          </div>
+
+        </div>
+        <div class="settings-actions">
+          <button type="submit" id="saveSettingsBtn" class="btn btn-primary">💾 Salvar Configurações</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Usage Dashboard -->
+    <div class="card usage-card-wrapper">
+      <div class="card-header">
+        <span class="card-icon" aria-hidden="true">📊</span>
+        <h2 class="card-title">Consumo de APIs</h2>
+        <button class="btn btn-secondary btn-sm" onclick="refreshUsage()" aria-label="Atualizar dados de consumo" style="margin-left:auto">🔄 Atualizar</button>
+      </div>
+      <div id="usageCards" class="usage-cards-grid" role="region" aria-label="Consumo hoje"></div>
+      <div id="usageTable" class="usage-table-wrapper" role="region" aria-label="Histórico de 7 dias" style="margin-top:var(--sp-4)"></div>
+    </div>
+
+  </section>
+
+</main>
+
+<!-- ═══ MODULE SCRIPTS ═══ -->
+<script type="module">
+  import { loadSettings, saveSettings, loadUsage } from '/js/settings.js';
+
+  // Expose to inline handlers
+  window.saveSettingsPage = saveSettings;
+  window.refreshUsage = loadUsage;
+
+  // Init
+  loadSettings();
+  loadUsage();
+</script>
+
+<!-- ═══ SERVICE WORKER REGISTRATION ═══ -->
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js')
+        .then(reg => console.log('SW registrado:', reg.scope))
+        .catch(err => console.warn('SW registro falhou:', err));
+    });
+  }
+</script>
+
+</body>
+</html>

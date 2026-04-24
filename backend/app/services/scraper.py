@@ -9,6 +9,7 @@ import requests as http_requests
 from bs4 import BeautifulSoup
 from app.config.settings import SITE_FETCH_TIMEOUT
 from app.services.external_api import serper_search
+from app.services.usage_tracker import track
 
 
 # ─── Email blacklists ───
@@ -101,11 +102,19 @@ def fetch_site_data(url: str, timeout: int = SITE_FETCH_TIMEOUT) -> dict:
             allow_redirects=True,
             verify=False,
         )
+        try:
+            track('maps')
+        except Exception:
+            pass
         if resp.status_code != 200:
             return result
         html = resp.text
     except Exception as e:
         print(f"  fetch_site_data error ({url}): {e}")
+        try:
+            track('maps')
+        except Exception:
+            pass
         return result
 
     # Extract emails

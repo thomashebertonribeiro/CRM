@@ -11,6 +11,7 @@ from app.models.errors import AppError, handle_error
 from app.routes.health import health_bp
 from app.routes.search import search_bp
 from app.routes.lead import lead_bp
+from app.routes.settings import settings_bp
 
 
 def create_app() -> Flask:
@@ -31,10 +32,17 @@ def create_app() -> Flask:
         }
     })
 
+    # ─── Load persisted settings before registering blueprints (Req 6.1, 6.2) ───
+    from app.services.settings_service import load_settings_file, apply_settings_to_module
+    _saved = load_settings_file()
+    if _saved:
+        apply_settings_to_module(_saved)
+
     # ─── Register Blueprints ───
     app.register_blueprint(health_bp)
     app.register_blueprint(search_bp)
     app.register_blueprint(lead_bp)
+    app.register_blueprint(settings_bp)
 
     # ─── Error Handlers ───
     app.register_error_handler(AppError, handle_error)
@@ -74,6 +82,9 @@ def create_app() -> Flask:
                     "lead_analysis": "PUT /api/search/<id>/lead/<lid>/analysis",
                     "lead_reanalyze": "POST /api/search/<id>/analyze-leads/<int>",
                     "lead_diagnose": "POST /api/search/<id>/diagnose/<lid>",
+                    "settings_get": "GET /api/settings",
+                    "settings_update": "POST /api/settings",
+                    "usage": "GET /api/usage",
                 }
             }
         })
