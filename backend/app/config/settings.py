@@ -90,6 +90,9 @@ BLACKLISTED_TITLE_WORDS = [
     "o que fazer", "turismo", "passeio",
 ]
 
+# ─── CNPJ API (local RF database service) ───
+CNPJ_API_URL = os.environ.get("CNPJ_API_URL", "http://cnpj-api:3001")
+
 # ─── Gunicorn ───
 GUNICORN_WORKERS = int(os.environ.get("GUNICORN_WORKERS", "4"))
 GUNICORN_TIMEOUT = int(os.environ.get("GUNICORN_TIMEOUT", "300"))

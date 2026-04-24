@@ -9,6 +9,7 @@ services:
       - OLLAMA_BASE=https://ollama.com/v1
       - OLLAMA_MODEL=glm-5.1
       - DATA_DIR=/app/data
+      - CNPJ_API_URL=http://cnpj-api:3001
     volumes:
       - prospector_data:/app/data
     networks:

@@ -11,7 +11,7 @@ from difflib import SequenceMatcher
 
 from app.config.settings import (
     BLACKLISTED_DOMAINS, BLACKLISTED_TITLE_WORDS, DEFAULT_MAX_RESULTS,
-    MAX_QUERY_VARIATIONS,
+    MAX_QUERY_VARIATIONS, CNPJ_API_URL,
 )
 from app.services.persistence import load_search, save_search, set_status
 from app.services.external_api import serper_search, check_cnpj, ai_analyze, parse_json_from_ia
@@ -451,152 +451,107 @@ def run_discovery(niche: str, city: str, state: str, max_results: int = DEFAULT_
 import re
 
 
-# ─── STEP 1b: CNAE Discovery (via Serper) ───
+# ─── STEP 1b: CNAE Discovery (via local RF API with Serper fallback) ───
+
+def _cnae_discovery_via_rf_api(cnae: str, city: str, state: str, limit: int, active_only: bool, search_id: str) -> list[dict] | None:
+    """
+    Query the local CNPJ API (Node.js service backed by RF SQLite database).
+    Returns list of lead dicts or None if the API is unavailable.
+    """
+    from app.config.settings import CNPJ_API_URL
+    import urllib.parse
+
+    city_upper = city.upper().strip()
+    url = (
+        f"{CNPJ_API_URL}/empresas/buscar"
+        f"?cnae={urllib.parse.quote(cnae)}"
+        f"&cidade={urllib.parse.quote(city_upper)}"
+        f"&limit={min(limit, 200)}"
+        f"&offset=0"
+        f"&active_only={'true' if active_only else 'false'}"
+    )
+
+    try:
+        resp = http_requests.get(url, timeout=15)
+        if not resp.ok:
+            print(f"[{search_id}] CNPJ API error: {resp.status_code}")
+            return None
+        data = resp.json()
+        empresas = data.get("empresas", [])
+        if not empresas:
+            return []
+
+        leads = []
+        for i, emp in enumerate(empresas):
+            end = emp.get("endereco", {})
+            contato = emp.get("contato", {})
+            cnae_info = emp.get("cnae", {})
+
+            # Build a lead compatible with the existing pipeline model
+            lead = {
+                "id": f"{search_id}_{i}",
+                "search_id": search_id,
+                "title": emp.get("nomeFantasia") or emp.get("razaoSocial", ""),
+                "razao_social": emp.get("razaoSocial", ""),
+                "link": "",
+                "snippet": f"{end.get('logradouro', '')} {end.get('numero', '')}, {end.get('bairro', '')}".strip(),
+                "position": i + 1,
+                "tem_site": False,
+                "tem_instagram": False,
+                "tem_facebook": False,
+                "tem_ads": False,
+                "tem_maps": False,
+                "instagram_url": "",
+                "facebook_url": "",
+                "site_url": "",
+                "site_emails": [],
+                "site_phones": [],
+                "site_instagram": "",
+                "site_facebook": "",
+                "site_youtube": "",
+                "site_tiktok": "",
+                # Pre-fill CNPJ data from RF — skip BrasilAPI lookup in enrich
+                "cnpj": emp.get("cnpj", "").replace(".", "").replace("/", "").replace("-", ""),
+                "cnpj_source": "receita_federal",
+                "situacao": emp.get("situacaoCadastral", ""),
+                "data_inicio": emp.get("dataInicioAtividade", ""),
+                "cnae_descricao": cnae_info.get("descricao", ""),
+                "porte": emp.get("porte", ""),
+                "maps_address": f"{end.get('logradouro', '')} {end.get('numero', '')}, {end.get('bairro', '')}, {end.get('municipio', '')} - {end.get('uf', '')}".strip(", "),
+                "maps_phone": contato.get("telefone1", ""),
+                "email_receita": contato.get("email", ""),
+                "enrichment_status": "partial",  # already has CNPJ data
+                "cnae_busca": cnae,
+            }
+
+            # Set site if email or phone available
+            if contato.get("telefone1"):
+                lead["site_phones"] = [contato["telefone1"]]
+            if contato.get("email"):
+                lead["site_emails"] = [contato["email"]]
+
+            leads.append(lead)
+
+        print(f"[{search_id}] CNPJ API returned {len(leads)} companies for CNAE={cnae}, city={city}")
+        return leads
+
+    except Exception as e:
+        print(f"[{search_id}] CNPJ API unavailable: {e}")
+        return None
+
 
 def run_cnae_discovery(cnae: str, city: str, state: str, limit: int = 50, active_only: bool = True, search_id: str = None) -> dict:
     """
-    Discovery via CNAE code using Serper search.
-    Generates targeted queries combining CNAE description + city + state,
-    then runs the same pipeline as run_discovery.
+    Discovery via CNAE code.
+    Uses local RF API (CNPJ database) when available, falls back to Serper.
     """
     if search_id is None:
         search_id = str(uuid.uuid4())[:8]
 
-    # CNAE descriptions for common codes (improves search quality)
-    CNAE_LABELS = {
-        "4711": "supermercado", "4712": "mercearia", "4721": "açougue",
-        "4722": "peixaria", "4723": "hortifrutigranjeiro", "4724": "padaria",
-        "4729": "alimentos", "4731": "combustível posto", "4741": "materiais construção",
-        "4742": "ferragem", "4744": "material elétrico", "4751": "tecidos",
-        "4752": "artigos cama mesa banho", "4753": "artigos de decoração",
-        "4754": "eletrodomésticos", "4755": "móveis", "4756": "artigos de iluminação",
-        "4757": "equipamentos informática", "4759": "artigos domésticos",
-        "4761": "livros", "4762": "discos", "4763": "artigos esportivos",
-        "4771": "farmácia drogaria", "4772": "perfumaria cosméticos",
-        "4773": "artigos médicos ortopédicos", "4774": "ótica",
-        "4781": "artigos vestuário", "4782": "calçados",
-        "4783": "joalheria relojoaria", "4784": "gás liquefeito",
-        "4785": "antiguidades", "4789": "comércio varejista",
-        "5611": "restaurante", "5612": "lanchonete", "5620": "catering",
-        "5630": "bar", "5811": "livros", "5812": "jornais revistas",
-        "6201": "desenvolvimento software", "6202": "consultoria TI",
-        "6209": "serviços TI", "6311": "processamento dados",
-        "6312": "hospedagem internet", "6319": "portais internet",
-        "6391": "agência notícias", "6399": "serviços informação",
-        "6411": "banco central", "6421": "banco comercial",
-        "6422": "banco múltiplo", "6431": "banco câmbio",
-        "6432": "banco investimento", "6433": "banco desenvolvimento",
-        "6434": "agência fomento", "6435": "crédito cooperativo",
-        "6436": "sociedade crédito", "6437": "sociedade crédito imobiliário",
-        "6438": "cooperativa crédito", "6440": "arrendamento mercantil",
-        "6450": "sociedade capitalização", "6461": "holdings",
-        "6462": "holdings financeiras", "6470": "fundos investimento",
-        "6491": "sociedade fomento mercantil", "6492": "securitizadoras",
-        "6493": "administradoras cartão crédito", "6499": "serviços financeiros",
-        "6511": "seguros vida", "6512": "seguros não vida",
-        "6520": "resseguros", "6530": "previdência complementar",
-        "6541": "saúde suplementar", "6542": "seguros saúde",
-        "6550": "planos previdência", "6611": "bolsa valores",
-        "6612": "corretora valores", "6613": "gestora recursos",
-        "6619": "serviços auxiliares financeiros", "6621": "avaliação riscos",
-        "6622": "corretora seguros", "6629": "serviços auxiliares seguros",
-        "6630": "gestão fundos", "6810": "imobiliária",
-        "6821": "corretora imóveis", "6822": "administradora imóveis",
-        "6911": "advocacia", "6912": "cartório",
-        "6920": "contabilidade auditoria", "7020": "consultoria gestão",
-        "7111": "arquitetura", "7112": "engenharia",
-        "7119": "serviços técnicos", "7120": "testes análises",
-        "7210": "pesquisa desenvolvimento", "7220": "pesquisa ciências",
-        "7310": "publicidade propaganda", "7311": "agência publicidade",
-        "7312": "agência mídia", "7319": "serviços publicidade",
-        "7320": "pesquisa mercado", "7410": "design",
-        "7420": "fotografia", "7490": "serviços profissionais",
-        "7500": "veterinária", "7711": "locação automóveis",
-        "7719": "locação veículos", "7721": "locação equipamentos",
-        "7722": "locação fitas vídeo", "7723": "locação roupas",
-        "7729": "locação outros", "7731": "locação máquinas agrícolas",
-        "7732": "locação máquinas construção", "7733": "locação máquinas escritório",
-        "7739": "locação máquinas", "7740": "gestão direitos propriedade",
-        "7810": "seleção pessoal", "7820": "locação mão obra",
-        "7830": "fornecimento recursos humanos", "7911": "agência viagem",
-        "7912": "operadora turismo", "7990": "serviços reservas",
-        "8011": "vigilância", "8012": "transporte valores",
-        "8020": "atividades investigação", "8030": "atividades investigação",
-        "8111": "serviços prediais", "8112": "imunização controle pragas",
-        "8121": "limpeza predial", "8122": "imunização",
-        "8129": "serviços limpeza", "8130": "jardinagem",
-        "8211": "serviços administrativos", "8219": "fotocópias",
-        "8220": "teleatendimento", "8230": "organização eventos",
-        "8291": "cobranças", "8292": "embalagens",
-        "8299": "serviços apoio", "8411": "administração pública",
-        "8412": "regulação saúde", "8413": "regulação atividades",
-        "8421": "relações exteriores", "8422": "defesa",
-        "8423": "justiça", "8424": "segurança pública",
-        "8425": "defesa civil", "8430": "seguridade social",
-        "8511": "educação infantil", "8512": "ensino fundamental",
-        "8513": "ensino médio", "8520": "ensino técnico",
-        "8531": "educação superior graduação", "8532": "educação superior pós",
-        "8533": "educação superior extensão", "8541": "educação profissional",
-        "8542": "educação profissional técnica", "8550": "atividades apoio educação",
-        "8591": "ensino idiomas", "8592": "ensino artes",
-        "8593": "ensino atividades culturais", "8599": "outras atividades ensino",
-        "8610": "hospital", "8621": "serviços médicos",
-        "8622": "serviços odontológicos", "8630": "atividades atenção saúde",
-        "8640": "serviços diagnóstico", "8650": "serviços saúde",
-        "8660": "atividades saúde complementares", "8690": "outras atividades saúde",
-        "8711": "atividades cuidados residenciais", "8712": "atividades cuidados especiais",
-        "8720": "atividades cuidados saúde mental", "8730": "atividades cuidados idosos",
-        "8800": "serviços assistência social", "9001": "artes cênicas",
-        "9002": "criação artística", "9003": "gestão instalações artísticas",
-        "9101": "biblioteca museu", "9102": "museu patrimônio",
-        "9103": "jardim botânico zoológico", "9200": "loteria",
-        "9311": "gestão instalações esportivas", "9312": "clubes esportivos",
-        "9313": "academia ginástica", "9319": "outras atividades esportivas",
-        "9321": "parques diversão", "9329": "atividades recreativas",
-        "9411": "sindicatos patronais", "9412": "sindicatos trabalhadores",
-        "9420": "atividades políticas", "9430": "atividades religiosas",
-        "9491": "atividades filantrópicas", "9492": "atividades políticas",
-        "9493": "atividades religiosas", "9499": "outras atividades associativas",
-        "9511": "reparação computadores", "9512": "reparação equipamentos comunicação",
-        "9521": "reparação eletrodomésticos", "9522": "reparação equipamentos domésticos",
-        "9529": "reparação objetos pessoais", "9601": "lavanderia",
-        "9602": "cabeleireiro", "9603": "serviços funerários",
-        "9609": "serviços pessoais", "9700": "serviços domésticos",
-        "9900": "organismos internacionais",
-    }
+    cnae_clean = cnae.replace("-", "").replace("/", "").replace(".", "")
+    cnae_label = f"CNAE {cnae_clean}"
 
-    # Get CNAE label for better search queries
-    cnae_prefix = cnae[:4] if len(cnae) >= 4 else cnae
-    cnae_label = CNAE_LABELS.get(cnae_prefix, f"CNAE {cnae}")
-
-    # Generate diverse targeted queries to maximize coverage
-    # Each query hits different Google results, so more queries = more unique leads
-    queries = [
-        f"{cnae_label} {city} {state}",
-        f"{cnae_label} {city}",
-        f"{cnae_label} empresa {city}",
-        f"{cnae_label} empresa {city} {state}",
-        f"assistência técnica {cnae_label} {city}" if "reparação" in cnae_label or "manutenção" in cnae_label else f"serviço {cnae_label} {city}",
-        f"{cnae_label} endereço telefone {city}",
-        f"empresa {cnae_label} {city} {state} contato",
-        f"oficina {cnae_label} {city}" if "reparação" in cnae_label else f"loja {cnae_label} {city}",
-    ]
-    if active_only:
-        queries.append(f"{cnae_label} ativa {city} {state}")
-    queries.append(f'"{cnae_label}" {city}')
-
-    # Remove duplicates while preserving order
-    seen_q = set()
-    unique_queries = []
-    for q in queries:
-        if q.lower() not in seen_q:
-            seen_q.add(q.lower())
-            unique_queries.append(q)
-    queries = unique_queries[:MAX_QUERY_VARIATIONS]
-    queries_total = len(queries)
-    queries_done = 0
-
-    print(f"[{search_id}] CNAE search: {cnae} ({cnae_label}) in {city}/{state}, limit={limit}")
+    print(f"[{search_id}] CNAE search: {cnae_clean} in {city}/{state}, limit={limit}")
 
     # Save initial state
     save_search(search_id, {
@@ -606,13 +561,12 @@ def run_cnae_discovery(cnae: str, city: str, state: str, limit: int = 50, active
             "niche": cnae_label,
             "city": city,
             "state": state,
-            "cnae": cnae,
+            "cnae": cnae_clean,
             "search_type": "cnae",
-            "query": queries[0],
-            "query_variations": queries,
-            "queries_total": queries_total,
+            "query": f"CNAE {cnae_clean} {city} {state}",
+            "queries_total": 1,
             "queries_done": 0,
-            "current_query": "Iniciando busca por CNAE...",
+            "current_query": "Consultando base da Receita Federal...",
             "total_results": 0,
             "com_site": 0, "sem_site": 0, "pct_sem_site": 0,
             "com_instagram": 0, "com_ads": 0, "com_maps": 0, "com_cnpj": 0,
@@ -620,154 +574,116 @@ def run_cnae_discovery(cnae: str, city: str, state: str, limit: int = 50, active
         "leads": [],
     })
 
-    # Places search — busca até 20 resultados de Maps
-    print(f"[{search_id}] CNAE Places: {queries[0]}")
-    places_data = serper_search(queries[0], "places", num=20)
-    queries_done += 1
-    places = places_data.get("places", [])
+    # ── Try local RF API first ──
+    rf_leads = _cnae_discovery_via_rf_api(cnae_clean, city, state, limit, active_only, search_id)
 
-    places_map = {}
-    for p in places:
-        name = p.get("title", "").lower()
-        places_map[name] = {
-            "maps_title": p.get("title"), "maps_rating": p.get("rating"),
-            "maps_reviews": p.get("reviewsCount"), "maps_address": p.get("address"),
-            "maps_phone": p.get("phoneNumber"), "maps_website": p.get("website"),
-            "maps_category": p.get("category"),
+    if rf_leads is not None:
+        # RF API available — use its results directly
+        leads = rf_leads[:limit]
+        source = "receita_federal"
+        print(f"[{search_id}] Using RF API: {len(leads)} leads")
+    else:
+        # RF API unavailable — fall back to Serper
+        print(f"[{search_id}] RF API unavailable, falling back to Serper")
+        source = "serper"
+
+        # CNAE label lookup for better Serper queries
+        CNAE_LABELS = {
+            "9521": "reparação eletrodomésticos", "9522": "reparação equipamentos domésticos",
+            "9511": "reparação computadores", "9512": "reparação equipamentos comunicação",
+            "4771": "farmácia drogaria", "4772": "perfumaria cosméticos",
+            "5611": "restaurante", "5612": "lanchonete", "5630": "bar",
+            "8621": "serviços médicos", "8622": "serviços odontológicos",
+            "9313": "academia ginástica", "6201": "desenvolvimento software",
+            "4744": "material elétrico", "4741": "materiais construção",
         }
+        cnae_prefix = cnae_clean[:4]
+        cnae_label = CNAE_LABELS.get(cnae_prefix, f"CNAE {cnae_clean}")
 
-    places_leads_raw = []
-    for p in places:
-        places_leads_raw.append({
-            "title": p.get("title", ""), "link": p.get("website", "") or "",
-            "snippet": p.get("address", "") or "", "position": None, "is_place": True,
-        })
+        queries = [
+            f"{cnae_label} {city} {state}",
+            f"{cnae_label} {city}",
+            f"{cnae_label} empresa {city}",
+        ][:MAX_QUERY_VARIATIONS]
 
-    # Organic searches — usa num=100 para maximizar resultados por query
-    all_raw_results = []
-    for qi, query in enumerate(queries):
-        print(f"[{search_id}] CNAE Busca {queries_done + 1}/{queries_total}: {query}")
-        search_data = serper_search(query, num=100)
-        queries_done += 1
+        # Places search
+        places_data = serper_search(queries[0], "places")
+        places = places_data.get("places", [])
+        places_map = {}
+        for p in places:
+            name = p.get("title", "").lower()
+            places_map[name] = {
+                "maps_title": p.get("title"), "maps_rating": p.get("rating"),
+                "maps_reviews": p.get("reviewsCount"), "maps_address": p.get("address"),
+                "maps_phone": p.get("phoneNumber"), "maps_website": p.get("website"),
+                "maps_category": p.get("category"),
+            }
 
-        # Update progress
-        data_progress = load_search(search_id)
-        if data_progress:
-            data_progress["summary"]["queries_done"] = queries_done
-            data_progress["summary"]["current_query"] = f"Busca {queries_done}/{queries_total}: {query}"
-            save_search(search_id, data_progress)
+        all_raw = []
+        for qi, query in enumerate(queries):
+            search_data = serper_search(query, num=100)
+            for result in search_data.get("organic", []):
+                all_raw.append(result)
+            if qi < len(queries) - 1:
+                time.sleep(2)
 
-        organic = search_data.get("organic", [])
-        ads = search_data.get("ads", [])
-        for result in organic:
-            result["_query_index"] = qi
-            all_raw_results.append(result)
-        for ad in ads:
-            ad["_is_ad"] = True
-            all_raw_results.append(ad)
-
-        if qi < len(queries) - 1:
-            time.sleep(2)
-
-    for p in places_leads_raw:
-        all_raw_results.append(p)
-
-    # Filter spam
-    filtered = [r for r in all_raw_results if not is_spam_result(r)]
-    print(f"[{search_id}] CNAE raw={len(all_raw_results)}, filtered={len(filtered)}")
-
-    # Build leads
-    leads = []
-    for idx, result in enumerate(filtered):
-        lead = {
-            "id": f"{search_id}_{idx}", "search_id": search_id,
-            "title": result.get("title", ""), "link": result.get("link", ""),
-            "snippet": result.get("snippet", ""), "position": result.get("position"),
-            "tem_site": False, "tem_instagram": False, "tem_facebook": False,
-            "tem_ads": False, "tem_maps": False,
-            "instagram_url": "", "facebook_url": "", "site_url": "",
-            "site_emails": [], "site_phones": [],
-            "site_instagram": "", "site_facebook": "", "site_youtube": "", "site_tiktok": "",
-            "cnpj_source": "", "enrichment_status": "pending",
-            "cnae_busca": cnae,
-        }
-
-        link_lower = result.get("link", "").lower()
-        snippet_lower = result.get("snippet", "").lower()
-        title_lower = result.get("title", "").lower()
-        combined = f"{link_lower} {snippet_lower} {title_lower}"
-
-        if "instagram.com" in link_lower:
-            lead["tem_instagram"] = True
-            lead["instagram_url"] = result.get("link", "")
-        elif "instagram.com" in snippet_lower:
-            lead["tem_instagram"] = True
-
-        if "facebook.com" in link_lower:
-            lead["tem_facebook"] = True
-            lead["facebook_url"] = result.get("link", "")
-
-        is_social = any(d in link_lower for d in [
-            "instagram.com", "facebook.com", "youtube.com", "tiktok.com",
-            "linkedin.com", "google.com", "maps.google",
-        ])
-        if link_lower and not is_social and link_lower.startswith("http"):
-            lead["tem_site"] = True
-            lead["site_url"] = result.get("link", "")
-
-        # Match with Places
-        for pname, pdata in places_map.items():
-            lead_words = set(title_lower.split())
-            place_words = set(pname.split())
-            if lead_words and place_words:
-                overlap = len(lead_words & place_words) / max(len(lead_words), len(place_words), 1)
-                if overlap >= 0.4:
+        filtered = [r for r in all_raw if not is_spam_result(r)]
+        leads = []
+        for idx, result in enumerate(filtered):
+            lead = {
+                "id": f"{search_id}_{idx}", "search_id": search_id,
+                "title": result.get("title", ""), "link": result.get("link", ""),
+                "snippet": result.get("snippet", ""), "position": result.get("position"),
+                "tem_site": False, "tem_instagram": False, "tem_facebook": False,
+                "tem_ads": False, "tem_maps": False,
+                "instagram_url": "", "facebook_url": "", "site_url": "",
+                "site_emails": [], "site_phones": [],
+                "site_instagram": "", "site_facebook": "", "site_youtube": "", "site_tiktok": "",
+                "cnpj_source": "", "enrichment_status": "pending",
+                "cnae_busca": cnae_clean,
+            }
+            link_lower = result.get("link", "").lower()
+            if not any(d in link_lower for d in ["instagram.com", "facebook.com", "youtube.com", "tiktok.com", "google.com"]):
+                if link_lower.startswith("http"):
+                    lead["tem_site"] = True
+                    lead["site_url"] = result.get("link", "")
+            for pname, pdata in places_map.items():
+                title_lower = lead["title"].lower()
+                if set(title_lower.split()) & set(pname.split()):
                     lead.update(pdata)
                     lead["tem_maps"] = True
                     if pdata.get("maps_website") and not lead["site_url"]:
                         lead["tem_site"] = True
                         lead["site_url"] = pdata["maps_website"]
                     break
+            leads.append(lead)
 
-        cnpj = extract_cnpj(combined)
-        if cnpj and len(cnpj) >= 14:
-            lead["cnpj_hint"] = cnpj
-
-        if result.get("_is_ad"):
-            lead["tem_ads"] = True
-
-        leads.append(lead)
-
-    # Dedup and limit
-    deduped = _deduplicate_leads(leads)
-    deduped = deduped[:limit]
+        leads = _deduplicate_leads(leads)[:limit]
 
     # Re-index
-    for i, lead in enumerate(deduped):
+    for i, lead in enumerate(leads):
         lead["id"] = f"{search_id}_{i}"
 
-    total = len(deduped)
-    com_site = sum(1 for l in deduped if l.get("tem_site"))
-    com_insta = sum(1 for l in deduped if l.get("tem_instagram"))
-    com_maps = sum(1 for l in deduped if l.get("tem_maps"))
-    com_ads = sum(1 for l in deduped if l.get("tem_ads"))
+    total = len(leads)
+    com_site = sum(1 for l in leads if l.get("tem_site"))
+    com_insta = sum(1 for l in leads if l.get("tem_instagram"))
+    com_maps = sum(1 for l in leads if l.get("tem_maps"))
+    com_cnpj = sum(1 for l in leads if l.get("cnpj"))
 
     summary = {
         "search_id": search_id,
         "niche": cnae_label,
         "city": city,
         "state": state,
-        "cnae": cnae,
+        "cnae": cnae_clean,
         "search_type": "cnae",
-        "query": queries[0],
-        "query_variations": queries,
-        "queries_total": queries_total,
-        "queries_done": queries_done,
-        "raw_results": len(all_raw_results),
-        "after_filter": len(filtered),
+        "source": source,
+        "query": f"CNAE {cnae_clean} {city} {state}",
+        "queries_total": 1,
+        "queries_done": 1,
         "total_results": total,
         "com_site": com_site, "com_instagram": com_insta,
-        "com_maps": com_maps, "com_ads": com_ads, "com_cnpj": 0,
+        "com_maps": com_maps, "com_ads": 0, "com_cnpj": com_cnpj,
         "sem_site": total - com_site, "sem_instagram": total - com_insta,
         "sem_maps": total - com_maps,
         "pct_sem_site": round((total - com_site) / total * 100) if total else 0,
@@ -775,10 +691,10 @@ def run_cnae_discovery(cnae: str, city: str, state: str, limit: int = 50, active
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
 
-    result_data = {"status": "discovery", "summary": summary, "leads": deduped}
+    result_data = {"status": "discovery", "summary": summary, "leads": leads}
     set_status(result_data, "discovery")
     save_search(search_id, result_data)
-    print(f"[{search_id}] CNAE discovery done: {total} leads")
+    print(f"[{search_id}] CNAE discovery done: {total} leads (source: {source})")
     return result_data
 
 
