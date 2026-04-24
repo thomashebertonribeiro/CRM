@@ -1243,3 +1243,36 @@ button:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 2px;
   color: var(--text2);
   margin: 0;
 }
+
+/* ─── Search tabs (Termo / CNAE) ─── */
+.search-tabs {
+  display: flex;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: var(--sp-3);
+}
+.search-tab {
+  padding: 8px 18px;
+  border-radius: var(--r-md) var(--r-md) 0 0;
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: transparent;
+  color: var(--text2);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--tr-fast), background var(--tr-fast), border-color var(--tr-fast);
+  position: relative;
+  bottom: -1px;
+}
+.search-tab:hover {
+  color: var(--text);
+  background: var(--bg-raised);
+}
+.search-tab--active {
+  color: var(--brand-400);
+  background: var(--bg-card);
+  border-color: var(--border);
+  border-bottom-color: var(--bg-card);
+}

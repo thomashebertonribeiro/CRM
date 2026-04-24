@@ -129,6 +129,14 @@ async function apiCreateSearch(niche, city, state) {
   });
 }
 
+async function apiCreateCnaeSearch(cnae, city, state, limit, active_only) {
+  return safeFetch(API + '/api/search/cnae', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cnae, city, state, limit, active_only })
+  });
+}
+
 async function apiGetSearch(searchId) {
   return safeFetch(API + '/api/search/' + searchId);
 }
@@ -180,7 +188,7 @@ async function apiDeleteSearch(searchId) {
 
 export {
   API, safeFetch, connectSSE, disconnectSSE,
-  apiCreateSearch, apiGetSearch, apiRunStep,
+  apiCreateSearch, apiCreateCnaeSearch, apiGetSearch, apiRunStep,
   apiUpdateLead, apiDeleteLead, apiAnalyzeLeads,
   apiAnalyzeSingleLead, apiDiagnose, apiSaveAnalysis,
   apiGetHistory, apiDeleteSearch

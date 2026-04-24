@@ -4,7 +4,7 @@
    ═══════════════════════════════════════════════════ */
 
 import { AppState, initState, getState, setState, subscribe, addRecentSearch, getFilteredLeads, setError, clearError } from './state.js';
-import { API, safeFetch, connectSSE, disconnectSSE, apiCreateSearch, apiGetSearch, apiRunStep, apiUpdateLead, apiDeleteLead, apiAnalyzeLeads, apiAnalyzeSingleLead, apiDiagnose, apiSaveAnalysis, apiGetHistory, apiDeleteSearch } from './api.js';
+import { API, safeFetch, connectSSE, disconnectSSE, apiCreateSearch, apiCreateCnaeSearch, apiGetSearch, apiRunStep, apiUpdateLead, apiDeleteLead, apiAnalyzeLeads, apiAnalyzeSingleLead, apiDiagnose, apiSaveAnalysis, apiGetHistory, apiDeleteSearch } from './api.js';
 import { esc, html, rawHtml, showToast, showLoading, setProgress, hideLoading, disableActions, enableActions, showSkeletonStats, showSkeletonLeads, showSkeletonHistory, renderErrorCard, renderFiltersBar, setupFilterEvents, renderLeadList } from './components.js';
 
 // ─── Pipeline Constants ───
@@ -379,6 +379,57 @@ async function doSearch() {
     showToast('Busca concluída!', 'success');
   } catch (e) { showToast(e.message, 'error', 6000, doSearch); }
   finally { hideLoading(); document.getElementById('searchBtn').disabled = false; }
+}
+
+// ─── Search Tab Switch ───
+
+function switchSearchTab(tab) {
+  const isTermo = tab === 'termo';
+  document.getElementById('formTermo').style.display = isTermo ? '' : 'none';
+  document.getElementById('formCnae').style.display = isTermo ? 'none' : '';
+  document.getElementById('tabTermo').classList.toggle('search-tab--active', isTermo);
+  document.getElementById('tabCnae').classList.toggle('search-tab--active', !isTermo);
+  document.getElementById('tabTermo').setAttribute('aria-selected', isTermo ? 'true' : 'false');
+  document.getElementById('tabCnae').setAttribute('aria-selected', isTermo ? 'false' : 'true');
+}
+
+// ─── CNAE Search ───
+
+async function doCnaeSearch() {
+  const cnae = document.getElementById('cnaeCode').value.trim();
+  const city = document.getElementById('cnaeCity').value.trim();
+  const state = document.getElementById('cnaeState').value;
+  const limit = parseInt(document.getElementById('cnaeLimit').value) || 50;
+  const activeOnly = document.getElementById('cnaeActiveOnly').checked;
+
+  if (!cnae) { showToast('Informe o código CNAE', 'warning'); return; }
+  if (!city) { showToast('Informe a cidade', 'warning'); return; }
+
+  const cnaeClean = cnae.replace(/[^0-9]/g, '');
+  if (cnaeClean.length < 4 || cnaeClean.length > 7) {
+    showToast('CNAE deve ter 4 a 7 dígitos (ex: 4744001)', 'warning');
+    return;
+  }
+
+  document.getElementById('cnaeBtnSearch').disabled = true;
+  showLoading('Buscando por CNAE...');
+  setProgress('');
+  document.getElementById('results').style.display = 'none';
+
+  try {
+    const initData = await apiCreateCnaeSearch(cnaeClean, city, state, limit, activeOnly);
+    if (initData.error) { showToast(initData.error, 'error'); return; }
+    setState('currentSearchId', initData.search_id);
+    addRecentSearch({
+      search_id: initData.search_id,
+      niche: `CNAE ${cnaeClean}`,
+      city, state,
+      timestamp: new Date().toISOString()
+    });
+    await pollDiscoveryProgress(AppState.currentSearchId);
+    showToast('Busca por CNAE concluída!', 'success');
+  } catch (e) { showToast(e.message, 'error', 6000, doCnaeSearch); }
+  finally { hideLoading(); document.getElementById('cnaeBtnSearch').disabled = false; }
 }
 
 // ─── CRUD: Edit Lead ───
@@ -849,6 +900,8 @@ function init() {
   // Enter key on search fields
   document.getElementById('niche').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
   document.getElementById('city').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+  document.getElementById('cnaeCode').addEventListener('keydown', e => { if (e.key === 'Enter') doCnaeSearch(); });
+  document.getElementById('cnaeCity').addEventListener('keydown', e => { if (e.key === 'Enter') doCnaeSearch(); });
 
   // Modal close handlers
   document.getElementById('diagModal').addEventListener('click', function(e) {
@@ -864,7 +917,8 @@ function init() {
 
 // ─── Expose as global namespace for inline event handlers ───
 window.Prospector = {
-  rerunStep, rerunStepApi, doSearch, showEditForm, saveEdit, cancelEdit,
+  rerunStep, rerunStepApi, doSearch, doCnaeSearch, switchSearchTab,
+  showEditForm, saveEdit, cancelEdit,
   deleteLead, reanalyzeLead, showAnalysisEditor, saveAnalysis, deleteSearch,
   loadSearch, openDiagModal, closeDiagModal, generateDiagnosis, copyWhatsAppMsg,
   analyzeNextLead, analyzeAllLeads, runAll, toggleLead, findLeadIndex,

@@ -18,7 +18,7 @@ from app.services.persistence import (
     load_search, save_search, delete_search_file, list_searches, set_status,
 )
 from app.services.pipeline import (
-    run_discovery, run_enrich, run_score, run_analyze_market, run_analyze_leads,
+    run_discovery, run_cnae_discovery, run_enrich, run_score, run_analyze_market, run_analyze_leads,
     _get_total_to_analyze,
 )
 from app.services.external_api import ai_analyze, parse_json_from_ia
@@ -200,6 +200,91 @@ def create_search():
     thread.start()
 
     return make_success(data={"search_id": search_id, "status": "discovering"}), 202
+
+
+# ═══════════════════════════════════════════════════
+# STEP 1c: CNAE Discovery
+# ═══════════════════════════════════════════════════
+
+@search_bp.route("/search/cnae", methods=["POST"])
+@rate_limit(limit=10, window=60)
+def create_cnae_search():
+    """Create a new search by CNAE code — starts CNAE discovery pipeline in background."""
+    import uuid
+    import time
+
+    try:
+        body = request.get_json(force=True, silent=True) or {}
+    except Exception:
+        raise ValidationError("Invalid JSON body")
+
+    cnae = body.get("cnae", "").strip()
+    city = body.get("city", "").strip()
+    state = body.get("state", "PR").strip()
+    limit = body.get("limit", 50)
+    active_only = body.get("active_only", True)
+
+    if not cnae:
+        raise ValidationError("Field 'cnae' is required")
+    if not city:
+        raise ValidationError("Field 'city' is required")
+
+    # Validate CNAE format (4-7 digits, optionally with dash and slash)
+    cnae_clean = re.sub(r"[^0-9]", "", cnae)
+    if len(cnae_clean) < 4 or len(cnae_clean) > 7:
+        raise ValidationError("CNAE must be 4 to 7 digits (e.g. '4744001' or '4744-0/01')")
+
+    try:
+        limit = int(limit)
+        if limit < 1 or limit > 200:
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise ValidationError("limit must be between 1 and 200")
+
+    city = re.sub(r"<[^>]*>", "", city)[:200]
+    state = re.sub(r"<[^>]*>", "", state).upper()[:2]
+
+    search_id = str(uuid.uuid4())[:8]
+
+    # Save initial state
+    save_search(search_id, {
+        "status": "discovering",
+        "summary": {
+            "search_id": search_id,
+            "niche": f"CNAE {cnae_clean}",
+            "city": city,
+            "state": state,
+            "cnae": cnae_clean,
+            "search_type": "cnae",
+            "query": f"CNAE {cnae_clean} {city} {state}",
+            "queries_total": 0,
+            "queries_done": 0,
+            "current_query": "Iniciando busca por CNAE...",
+            "total_results": 0,
+            "com_site": 0, "sem_site": 0, "pct_sem_site": 0,
+            "com_instagram": 0, "com_ads": 0, "com_maps": 0, "com_cnpj": 0,
+        },
+        "leads": [],
+    })
+
+    def _run():
+        try:
+            run_cnae_discovery(cnae_clean, city, state, limit=limit, active_only=active_only, search_id=search_id)
+        except Exception as e:
+            print(f"[CNAE DISCOVERY ERROR] {e}")
+            try:
+                data = load_search(search_id)
+                if data:
+                    set_status(data, "error")
+                    data["error"] = str(e)
+                    save_search(search_id, data)
+            except Exception:
+                pass
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+    return make_success(data={"search_id": search_id, "status": "discovering", "search_type": "cnae"}), 202
 
 
 # ═══════════════════════════════════════════════════

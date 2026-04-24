@@ -68,6 +68,7 @@ def create_app() -> Flask:
                 "endpoints": {
                     "health": "/api/health",
                     "search_create": "POST /api/search",
+                    "search_cnae": "POST /api/search/cnae",
                     "search_get": "GET /api/search/<id>",
                     "search_delete": "DELETE /api/search/<id>",
                     "search_rediscover": "POST /api/search/<id>/rediscover",

@@ -38,33 +38,90 @@
       <span class="card-icon" aria-hidden="true">🔎</span>
       <h2 class="card-title">Buscar Empresas</h2>
     </div>
-    <div class="search-row" style="display:flex;gap:var(--sp-3);flex-wrap:wrap;">
-      <div class="form-group" style="flex:2;min-width:200px">
-        <label class="form-label" for="niche">Nicho</label>
-        <input type="text" id="niche" class="form-input" placeholder="Ex: clínicas de estética" autocomplete="off">
-      </div>
-      <div class="form-group" style="flex:2;min-width:180px">
-        <label class="form-label" for="city">Cidade</label>
-        <input type="text" id="city" class="form-input" placeholder="Ex: Cascavel" autocomplete="off">
-      </div>
-      <div class="form-group" style="flex:1;min-width:100px">
-        <label class="form-label" for="state">Estado</label>
-        <select id="state" class="form-select">
-          <option value="PR">PR</option><option value="SC">SC</option><option value="RS">RS</option>
-          <option value="SP">SP</option><option value="MG">MG</option><option value="RJ">RJ</option>
-          <option value="ES">ES</option><option value="MS">MS</option><option value="MT">MT</option>
-          <option value="GO">GO</option><option value="DF">DF</option><option value="BA">BA</option>
-          <option value="CE">CE</option><option value="PE">PE</option><option value="AM">AM</option>
-          <option value="PA">PA</option><option value="MA">MA</option><option value="PB">PB</option>
-          <option value="RN">RN</option><option value="AL">AL</option><option value="PI">PI</option>
-          <option value="SE">SE</option><option value="TO">TO</option><option value="RO">RO</option>
-          <option value="AC">AC</option><option value="AP">AP</option><option value="RR">RR</option>
-        </select>
-      </div>
-      <div class="form-group" style="flex:0 0 auto;align-self:flex-end">
-        <button class="btn btn-primary btn-lg" id="searchBtn" onclick="Prospector.doSearch()">🔍 Descobrir</button>
+
+    <!-- Abas de modo de busca -->
+    <div class="search-tabs" role="tablist" aria-label="Modo de busca">
+      <button class="search-tab search-tab--active" id="tabTermo" role="tab" aria-selected="true" aria-controls="formTermo" onclick="Prospector.switchSearchTab('termo')">
+        🔍 Por Termo
+      </button>
+      <button class="search-tab" id="tabCnae" role="tab" aria-selected="false" aria-controls="formCnae" onclick="Prospector.switchSearchTab('cnae')">
+        📋 Por CNAE
+      </button>
+    </div>
+
+    <!-- Formulário: Busca por Termo (atual) -->
+    <div id="formTermo" role="tabpanel" aria-labelledby="tabTermo">
+      <div class="search-row" style="display:flex;gap:var(--sp-3);flex-wrap:wrap;">
+        <div class="form-group" style="flex:2;min-width:200px">
+          <label class="form-label" for="niche">Nicho</label>
+          <input type="text" id="niche" class="form-input" placeholder="Ex: clínicas de estética" autocomplete="off">
+        </div>
+        <div class="form-group" style="flex:2;min-width:180px">
+          <label class="form-label" for="city">Cidade</label>
+          <input type="text" id="city" class="form-input" placeholder="Ex: Cascavel" autocomplete="off">
+        </div>
+        <div class="form-group" style="flex:1;min-width:100px">
+          <label class="form-label" for="state">Estado</label>
+          <select id="state" class="form-select">
+            <option value="PR">PR</option><option value="SC">SC</option><option value="RS">RS</option>
+            <option value="SP">SP</option><option value="MG">MG</option><option value="RJ">RJ</option>
+            <option value="ES">ES</option><option value="MS">MS</option><option value="MT">MT</option>
+            <option value="GO">GO</option><option value="DF">DF</option><option value="BA">BA</option>
+            <option value="CE">CE</option><option value="PE">PE</option><option value="AM">AM</option>
+            <option value="PA">PA</option><option value="MA">MA</option><option value="PB">PB</option>
+            <option value="RN">RN</option><option value="AL">AL</option><option value="PI">PI</option>
+            <option value="SE">SE</option><option value="TO">TO</option><option value="RO">RO</option>
+            <option value="AC">AC</option><option value="AP">AP</option><option value="RR">RR</option>
+          </select>
+        </div>
+        <div class="form-group" style="flex:0 0 auto;align-self:flex-end">
+          <button class="btn btn-primary btn-lg" id="searchBtn" onclick="Prospector.doSearch()">🔍 Descobrir</button>
+        </div>
       </div>
     </div>
+
+    <!-- Formulário: Busca por CNAE (novo) -->
+    <div id="formCnae" role="tabpanel" aria-labelledby="tabCnae" style="display:none">
+      <div class="search-row" style="display:flex;gap:var(--sp-3);flex-wrap:wrap;">
+        <div class="form-group" style="flex:1;min-width:160px">
+          <label class="form-label" for="cnaeCode">Código CNAE</label>
+          <input type="text" id="cnaeCode" class="form-input" placeholder="Ex: 4744001" autocomplete="off" maxlength="10" aria-describedby="cnaeHint">
+          <span id="cnaeHint" style="font-size:11px;color:var(--text3)">4 a 7 dígitos</span>
+        </div>
+        <div class="form-group" style="flex:2;min-width:180px">
+          <label class="form-label" for="cnaeCity">Cidade</label>
+          <input type="text" id="cnaeCity" class="form-input" placeholder="Ex: Londrina" autocomplete="off">
+        </div>
+        <div class="form-group" style="flex:1;min-width:100px">
+          <label class="form-label" for="cnaeState">Estado</label>
+          <select id="cnaeState" class="form-select">
+            <option value="PR">PR</option><option value="SC">SC</option><option value="RS">RS</option>
+            <option value="SP">SP</option><option value="MG">MG</option><option value="RJ">RJ</option>
+            <option value="ES">ES</option><option value="MS">MS</option><option value="MT">MT</option>
+            <option value="GO">GO</option><option value="DF">DF</option><option value="BA">BA</option>
+            <option value="CE">CE</option><option value="PE">PE</option><option value="AM">AM</option>
+            <option value="PA">PA</option><option value="MA">MA</option><option value="PB">PB</option>
+            <option value="RN">RN</option><option value="AL">AL</option><option value="PI">PI</option>
+            <option value="SE">SE</option><option value="TO">TO</option><option value="RO">RO</option>
+            <option value="AC">AC</option><option value="AP">AP</option><option value="RR">RR</option>
+          </select>
+        </div>
+        <div class="form-group" style="flex:0 0 auto;min-width:100px">
+          <label class="form-label" for="cnaeLimit">Limite</label>
+          <input type="number" id="cnaeLimit" class="form-input" value="50" min="1" max="200" style="width:80px">
+        </div>
+        <div class="form-group" style="flex:0 0 auto;align-self:flex-end">
+          <label class="form-label" style="display:flex;align-items:center;gap:var(--sp-2);cursor:pointer">
+            <input type="checkbox" id="cnaeActiveOnly" checked style="width:16px;height:16px;accent-color:var(--brand-500)">
+            <span style="font-size:13px">Só ativas</span>
+          </label>
+        </div>
+        <div class="form-group" style="flex:0 0 auto;align-self:flex-end">
+          <button class="btn btn-primary btn-lg" id="cnaeBtnSearch" onclick="Prospector.doCnaeSearch()">📋 Buscar por CNAE</button>
+        </div>
+      </div>
+    </div>
+
   </section>
 
   <!-- ═══ LOADING ═══ -->
