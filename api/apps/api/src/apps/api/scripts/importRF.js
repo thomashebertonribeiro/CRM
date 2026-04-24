@@ -213,37 +213,75 @@ async function importMunicipios(db, zipPath) {
 async function importEstabelecimentos(db, zipPath, fileIndex) {
   log(`Importing Estabelecimentos${fileIndex}...`);
 
-  const entry = getFirstEntry(zipPath);
-  if (!entry) {
-    log(`WARNING: No entry found in Estabelecimentos${fileIndex}.zip`);
-    return 0;
-  }
-
-  log(`  Reading entry: ${entry.entryName}`);
+  // Check file size first
+  const stats = fs.statSync(zipPath);
+  log(`  ZIP size: ${(stats.size / 1024 / 1024).toFixed(1)}MB`);
 
   // Build municipio lookup map
   const municipioMap = new Map();
   const municipioRows = db.prepare('SELECT codigo, nome FROM municipios').all();
   for (const row of municipioRows) municipioMap.set(row.codigo, row.nome);
+  log(`  Loaded ${municipioMap.size} municipios for lookup`);
 
-  const content = entry.getData().toString('latin1');
-  const lines = content.split('\n');
+  // Use streaming unzip to avoid loading 500MB into memory
+  // Extract to temp file first, then process line by line
+  const tmpCsv = path.join(DATA_DIR, `_tmp_estab${fileIndex}.csv`);
+
+  try {
+    // Extract using unzip command (available in alpine)
+    log(`  Extracting ZIP...`);
+    const { execSync } = await import('child_process');
+    execSync(`unzip -p "${zipPath}" > "${tmpCsv}"`, { maxBuffer: 1024 * 1024 * 10 });
+    log(`  Extracted to temp file`);
+  } catch (e) {
+    // Fallback: try adm-zip with streaming
+    log(`  unzip failed (${e.message}), trying adm-zip...`);
+    try {
+      const zip = new AdmZip(zipPath);
+      const entries = zip.getEntries();
+      log(`  ZIP entries: ${entries.map(en => `${en.entryName}(${en.header.size}b)`).join(', ')}`);
+      const entry = entries.find(en => !en.isDirectory);
+      if (!entry) {
+        log(`  No entry found, skipping`);
+        return 0;
+      }
+      log(`  Extracting entry: ${entry.entryName}`);
+      zip.extractEntryTo(entry, DATA_DIR, false, true, false, `_tmp_estab${fileIndex}.csv`);
+    } catch (e2) {
+      log(`  adm-zip also failed: ${e2.message}`);
+      return 0;
+    }
+  }
+
+  if (!fs.existsSync(tmpCsv)) {
+    log(`  Temp file not created, skipping`);
+    return 0;
+  }
+
+  const tmpStats = fs.statSync(tmpCsv);
+  log(`  Temp CSV size: ${(tmpStats.size / 1024 / 1024).toFixed(1)}MB`);
+
+  // Process line by line using readline (streaming, low memory)
+  const { createInterface } = await import('readline');
+  const rl = createInterface({
+    input: fs.createReadStream(tmpCsv, { encoding: 'latin1' }),
+    crlfDelay: Infinity,
+  });
 
   const insert = db.prepare(`
     INSERT OR REPLACE INTO estabelecimentos VALUES (
       ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
     )
   `);
-
   const insertMany = db.transaction((rows) => {
     for (const row of rows) insert.run(...row);
   });
 
   let count = 0;
   let batch = [];
-  const BATCH_SIZE = 10000;
+  const BATCH_SIZE = 5000;
 
-  for (const line of lines) {
+  for await (const line of rl) {
     if (!line.trim()) continue;
     const parts = line.split(';').map(p => p.trim().replace(/^"|"$/g, '') || null);
     if (parts.length < 20) continue;
@@ -268,7 +306,7 @@ async function importEstabelecimentos(db, zipPath, fileIndex) {
       insertMany(batch);
       count += batch.length;
       batch = [];
-      if (count % 100000 === 0) log(`  ${count.toLocaleString()} records imported...`);
+      if (count % 50000 === 0) log(`  ${count.toLocaleString()} records imported...`);
     }
   }
 
@@ -276,6 +314,9 @@ async function importEstabelecimentos(db, zipPath, fileIndex) {
     insertMany(batch);
     count += batch.length;
   }
+
+  // Cleanup temp file
+  try { fs.unlinkSync(tmpCsv); } catch (_) {}
 
   log(`  File ${fileIndex}: ${count.toLocaleString()} records imported`);
   return count;
