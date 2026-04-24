@@ -569,17 +569,30 @@ def run_cnae_discovery(cnae: str, city: str, state: str, limit: int = 50, active
     cnae_prefix = cnae[:4] if len(cnae) >= 4 else cnae
     cnae_label = CNAE_LABELS.get(cnae_prefix, f"CNAE {cnae}")
 
-    # Generate targeted queries
+    # Generate diverse targeted queries to maximize coverage
+    # Each query hits different Google results, so more queries = more unique leads
     queries = [
         f"{cnae_label} {city} {state}",
         f"{cnae_label} {city}",
-        f'empresa "{cnae}" {city}',
+        f"{cnae_label} empresa {city}",
         f"{cnae_label} empresa {city} {state}",
+        f"assistência técnica {cnae_label} {city}" if "reparação" in cnae_label or "manutenção" in cnae_label else f"serviço {cnae_label} {city}",
+        f"{cnae_label} endereço telefone {city}",
+        f"empresa {cnae_label} {city} {state} contato",
+        f"oficina {cnae_label} {city}" if "reparação" in cnae_label else f"loja {cnae_label} {city}",
     ]
     if active_only:
-        queries.append(f"{cnae_label} ativa {city}")
+        queries.append(f"{cnae_label} ativa {city} {state}")
+    queries.append(f'"{cnae_label}" {city}')
 
-    queries = queries[:MAX_QUERY_VARIATIONS]
+    # Remove duplicates while preserving order
+    seen_q = set()
+    unique_queries = []
+    for q in queries:
+        if q.lower() not in seen_q:
+            seen_q.add(q.lower())
+            unique_queries.append(q)
+    queries = unique_queries[:MAX_QUERY_VARIATIONS]
     queries_total = len(queries)
     queries_done = 0
 
@@ -607,9 +620,9 @@ def run_cnae_discovery(cnae: str, city: str, state: str, limit: int = 50, active
         "leads": [],
     })
 
-    # Places search
+    # Places search — busca até 20 resultados de Maps
     print(f"[{search_id}] CNAE Places: {queries[0]}")
-    places_data = serper_search(queries[0], "places")
+    places_data = serper_search(queries[0], "places", num=20)
     queries_done += 1
     places = places_data.get("places", [])
 
@@ -630,11 +643,11 @@ def run_cnae_discovery(cnae: str, city: str, state: str, limit: int = 50, active
             "snippet": p.get("address", "") or "", "position": None, "is_place": True,
         })
 
-    # Organic searches
+    # Organic searches — usa num=100 para maximizar resultados por query
     all_raw_results = []
     for qi, query in enumerate(queries):
         print(f"[{search_id}] CNAE Busca {queries_done + 1}/{queries_total}: {query}")
-        search_data = serper_search(query)
+        search_data = serper_search(query, num=100)
         queries_done += 1
 
         # Update progress

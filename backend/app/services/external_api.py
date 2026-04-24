@@ -91,11 +91,20 @@ def sanitize_prompt_input(text: str) -> str:
 
 # ─── Serper API ───
 
-def serper_search(query: str, search_type: str = "search") -> dict:
-    """Call Serper.dev API for search/places."""
+def serper_search(query: str, search_type: str = "search", num: int = 10, page: int = 1) -> dict:
+    """Call Serper.dev API for search/places.
+    
+    Args:
+        query: Search query string
+        search_type: 'search' or 'places'
+        num: Number of results to return (10-100, default 10)
+        page: Page number for pagination (default 1)
+    """
     url = f"https://google.serper.dev/{search_type}"
     headers = {"X-API-KEY": SERPER_KEY, "Content-Type": "application/json"}
-    payload = {"q": query, "gl": "br", "hl": "pt-br"}
+    payload = {"q": query, "gl": "br", "hl": "pt-br", "num": num}
+    if page > 1:
+        payload["page"] = page
     try:
         r = http_requests.post(url, headers=headers, json=payload, timeout=SERPER_TIMEOUT)
         r.raise_for_status()
