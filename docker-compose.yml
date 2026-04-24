@@ -29,8 +29,24 @@ services:
       - prospector_net
     restart: unless-stopped
 
+  cnpj-api:
+    build: ./api/apps/api
+    environment:
+      - PORT=3001
+      - NODE_ENV=production
+      - CORS_ORIGIN=*
+      - RF_DATA_DIR=/app/data/rf
+    volumes:
+      - cnpj_rf_data:/app/data/rf
+    networks:
+      - prospector_net
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+
 volumes:
   prospector_data:
+  cnpj_rf_data:
 
 networks:
   prospector_net:
