@@ -105,12 +105,19 @@ def serper_search(query: str, search_type: str = "search", num: int = 10, page: 
     payload = {"q": query, "gl": "br", "hl": "pt-br", "num": num}
     if page > 1:
         payload["page"] = page
+    if not SERPER_KEY:
+        raise ValueError("SERPER_KEY (API Key) is missing. Please configure it in your .env file.")
+
     try:
         r = http_requests.post(url, headers=headers, json=payload, timeout=SERPER_TIMEOUT)
+        if r.status_code == 403 or r.status_code == 401:
+            raise ValueError("Serper API Key is invalid or expired.")
         r.raise_for_status()
         return r.json()
     except Exception as e:
         print(f"Serper error ({search_type}): {e}")
+        if isinstance(e, ValueError):
+            raise e
         return {}
     finally:
         try:
