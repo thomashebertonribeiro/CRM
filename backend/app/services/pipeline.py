@@ -487,11 +487,13 @@ def _cnae_discovery_via_rf_api(cnae: str, city: str, state: str, limit: int, act
             contato = emp.get("contato", {})
             cnae_info = emp.get("cnae", {})
 
+            cnpj_fmt = emp.get("cnpjFormatado") or emp.get("cnpj", "")
+            title_fallback = emp.get("nomeFantasia") or emp.get("razaoSocial") or f"Empresa CNPJ {cnpj_fmt}"
             # Build a lead compatible with the existing pipeline model
             lead = {
                 "id": f"{search_id}_{i}",
                 "search_id": search_id,
-                "title": emp.get("nomeFantasia") or emp.get("razaoSocial", ""),
+                "title": title_fallback,
                 "razao_social": emp.get("razaoSocial", ""),
                 "link": "",
                 "snippet": f"{end.get('logradouro', '')} {end.get('numero', '')}, {end.get('bairro', '')}".strip(),
