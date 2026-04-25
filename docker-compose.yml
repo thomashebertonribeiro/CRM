@@ -6,8 +6,8 @@ services:
     environment:
       - SERPER_KEY=${SERPER_KEY}
       - OLLAMA_KEY=${OLLAMA_KEY}
-      - OLLAMA_BASE=https://ollama.com/v1
-      - OLLAMA_MODEL=glm-5.1
+      - OLLAMA_BASE=${OLLAMA_BASE:-http://172.17.0.1:11434/v1}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-deepseek-v4-flash}
       - DATA_DIR=/app/data
       - CNPJ_API_URL=http://cnpj-api:3001
     volumes:
