@@ -128,8 +128,8 @@ function searchByCnaeAndCity(cnae, cidade, limit = 50, offset = 0, activeOnly = 
   // Clean CNAE (remove non-digits)
   const cnaeClean = cnae.replace(/\D/g, '');
 
-  let whereClause = `cnae_fiscal_principal = ? AND municipio IN (${placeholders})`;
-  const params = [cnaeClean, ...municipioCodes];
+  let whereClause = `(cnae_fiscal_principal = ? OR cnae_fiscal_secundaria LIKE ?) AND municipio IN (${placeholders})`;
+  const params = [cnaeClean, `%${cnaeClean}%`, ...municipioCodes];
 
   if (activeOnly) {
     whereClause += " AND situacao_cadastral = '02'";
