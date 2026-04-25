@@ -207,7 +207,13 @@ def _deduplicate_leads(leads: list[dict]) -> list[dict]:
 
         if not is_dup:
             for existing in result:
-                sim = fuzzy_similarity(title, existing.get("title", ""))
+                existing_title = existing.get("title", "")
+                
+                # Do not fuzzy-match generic CNPJ fallback titles
+                if title.startswith("Empresa CNPJ") and existing_title.startswith("Empresa CNPJ"):
+                    continue
+                    
+                sim = fuzzy_similarity(title, existing_title)
                 if sim >= 0.7:
                     if completeness_score(lead) > completeness_score(existing):
                         _merge_lead(existing, lead)
