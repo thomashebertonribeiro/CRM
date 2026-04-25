@@ -757,14 +757,30 @@ def run_enrich(search_id: str) -> dict | None:
     # Site scraping
     print(f"[{search_id}] Starting site scraping for {len(leads)} leads...")
     for i, lead in enumerate(leads):
-        if lead.get("enrichment_status") in ("done", "partial"):
+        if lead.get("enrichment_status") == "done":
             continue
 
         urls_to_fetch = []
         if lead.get("site_url"):
             urls_to_fetch.append(("site", lead["site_url"]))
-        if lead.get("maps_website") and lead["maps_website"] != lead.get("site_url"):
+        if lead.get("maps_website") and lead.get("maps_website") != lead.get("site_url"):
             urls_to_fetch.append(("maps", lead["maps_website"]))
+
+        # If no site is known, use Serper to find it
+        if not urls_to_fetch and lead.get("title") and not lead.get("title").startswith("Empresa CNPJ"):
+            try:
+                city = data.get("summary", {}).get("city", "")
+                query = f"{lead.get('title')} {city} site oficial"
+                search_data = serper_search(query, num=3)
+                for res in search_data.get("organic", []):
+                    link = res.get("link", "").lower()
+                    if not any(d in link for d in ["instagram.com", "facebook.com", "youtube.com", "tiktok.com", "google.com", "jusbrasil.com.br", "reclameaqui.com.br"]):
+                        lead["site_url"] = res.get("link")
+                        lead["tem_site"] = True
+                        urls_to_fetch.append(("serper", lead["site_url"]))
+                        break
+            except Exception as e:
+                print(f"  [{search_id}] Error searching site via Serper: {e}")
 
         any_data_found = False
         for source, url in urls_to_fetch:
