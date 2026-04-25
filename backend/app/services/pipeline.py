@@ -478,7 +478,8 @@ def _cnae_discovery_via_rf_api(cnae: str, city: str, state: str, limit: int, act
     )
 
     try:
-        resp = http_requests.get(url, timeout=15)
+        import requests
+        resp = requests.get(url, timeout=15)
         if not resp.ok:
             print(f"[{search_id}] CNPJ API error: {resp.status_code}")
             return None
