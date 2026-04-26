@@ -270,6 +270,7 @@ def create_cnae_search():
     def _run():
         try:
             run_cnae_discovery(cnae_clean, city, state, limit=limit, active_only=active_only, search_id=search_id)
+            run_enrich(search_id)
         except Exception as e:
             print(f"[CNAE DISCOVERY ERROR] {e}")
             try:

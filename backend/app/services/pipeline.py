@@ -760,27 +760,59 @@ def run_enrich(search_id: str) -> dict | None:
         if lead.get("enrichment_status") == "done":
             continue
 
+        city = data.get("summary", {}).get("city", "")
+
+        # Busca dados do Google Maps se não tiver
+        if not lead.get("tem_maps") and lead.get("title") and not lead.get("title").startswith("Empresa CNPJ"):
+            try:
+                places_data = serper_search(f"{lead.get('title')} {city}", "places")
+                places = places_data.get("places", [])
+                if places:
+                    p = places[0] # Pega o primeiro resultado do Maps
+                    if fuzzy_similarity(lead.get('title', ''), p.get('title', '')) >= 0.4:
+                        lead["tem_maps"] = True
+                        lead["maps_title"] = p.get("title")
+                        lead["maps_rating"] = p.get("rating")
+                        lead["maps_reviews"] = p.get("reviewsCount")
+                        lead["maps_address"] = p.get("address")
+                        lead["maps_phone"] = p.get("phoneNumber")
+                        lead["maps_website"] = p.get("website")
+                        lead["maps_category"] = p.get("category")
+                        
+                        if p.get("website") and not lead.get("site_url"):
+                            lead["tem_site"] = True
+                            lead["site_url"] = p.get("website")
+            except Exception as e:
+                print(f"  [{search_id}] Error searching maps via Serper: {e}")
+
         urls_to_fetch = []
         if lead.get("site_url"):
             urls_to_fetch.append(("site", lead["site_url"]))
         if lead.get("maps_website") and lead.get("maps_website") != lead.get("site_url"):
             urls_to_fetch.append(("maps", lead["maps_website"]))
 
-        # If no site is known, use Serper to find it
-        if not urls_to_fetch and lead.get("title") and not lead.get("title").startswith("Empresa CNPJ"):
+        # Se ainda não tem site, busca no orgânico e tenta achar Instagram/Facebook no caminho
+        if lead.get("title") and not lead.get("title").startswith("Empresa CNPJ"):
             try:
-                city = data.get("summary", {}).get("city", "")
-                query = f"{lead.get('title')} {city} site oficial"
-                search_data = serper_search(query, num=3)
+                query = f"{lead.get('title')} {city}"
+                search_data = serper_search(query, num=5)
                 for res in search_data.get("organic", []):
                     link = res.get("link", "").lower()
-                    if not any(d in link for d in ["instagram.com", "facebook.com", "youtube.com", "tiktok.com", "google.com", "jusbrasil.com.br", "reclameaqui.com.br"]):
+                    if "instagram.com" in link and not lead.get("tem_instagram"):
+                        lead["tem_instagram"] = True
+                        lead["instagram_url"] = res.get("link")
+                        continue
+                    if "facebook.com" in link and not lead.get("tem_facebook"):
+                        lead["tem_facebook"] = True
+                        lead["facebook_url"] = res.get("link")
+                        continue
+                        
+                    if not urls_to_fetch and not any(d in link for d in ["instagram.com", "facebook.com", "youtube.com", "tiktok.com", "google.com", "jusbrasil.com.br", "reclameaqui.com.br", "linkedin.com"]):
                         lead["site_url"] = res.get("link")
                         lead["tem_site"] = True
                         urls_to_fetch.append(("serper", lead["site_url"]))
-                        break
             except Exception as e:
-                print(f"  [{search_id}] Error searching site via Serper: {e}")
+                print(f"  [{search_id}] Error searching site/social via Serper: {e}")
 
         any_data_found = False
         for source, url in urls_to_fetch:
